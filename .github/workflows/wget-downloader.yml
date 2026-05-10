@@ -11,6 +11,7 @@ on:
 jobs:
   download-and-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     permissions:
       contents: write
     steps:
@@ -44,18 +45,21 @@ jobs:
         run: |
           mkdir -p tmpwget
           cd tmpwget
-          wget --content-disposition --trust-server-names "${{ github.event.inputs.link }}"
+          wget -q --show-progress \
+            --content-disposition \
+            --trust-server-names \
+            "${{ github.event.inputs.link }}"
 
           FILE=$(ls -1 | head -n 1)
           SAFE_NAME=$(echo "$FILE" | sed 's/^[[:space:]]*//' | tr ' ' '_')
           echo "SAFE_NAME=$SAFE_NAME" >> $GITHUB_ENV
 
           mkdir -p ../wget
-          echo "Splitting into 50MB chunks..."
-          split -b 50M "$FILE" "../wget/${SAFE_NAME}.part"
+          echo "Splitting into 1GB parts..."
+          split -b 1024M "$FILE" "../wget/${SAFE_NAME}.part"
           echo "Generated parts:"
           ls -lh ../wget
-      - name: Generate README with Download Links
+      - name: Generate README
         run: |
           rm -f README.md
           echo "# 📥 Wget Download Links" > README.md
@@ -80,13 +84,28 @@ jobs:
           echo "" >> README.md
           echo '### Windows CMD' >> README.md
           echo '```cmd' >> README.md
-          echo "copy /b ${SAFE_NAME}.partaa+${SAFE_NAME}.partab ${SAFE_NAME}" >> README.md
+          echo "copy /b ${SAFE_NAME}.partaa+${SAFE_NAME}.partab+${SAFE_NAME}.partac ${SAFE_NAME}" >> README.md
           echo '```' >> README.md
 
-      - name: Commit and Push
+      - name: Push Files Individually
         run: |
-          git add README.md wget
+          git config http.postBuffer 2147483648
+          git config core.compression 0
 
-          git commit -m "[bot] Add wget download ${{ env.SAFE_NAME }}" || echo "Nothing to commit"
+          echo "Uploading files individually..."
+
+          for file in wget/*; do
+            echo "Uploading $file"
+
+            git add "$file"
+
+            git commit -m "Add $(basename "$file")" || true
+
+            git push origin wget || exit 1
+          done
+
+          git add README.md
+
+          git commit -m "Update README" || true
 
           git push origin wget
